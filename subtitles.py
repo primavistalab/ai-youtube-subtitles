@@ -1,9 +1,11 @@
 import json
 import logging
+import os
 
 from flask import Flask, request
 from youtube_transcript_api import YouTubeTranscriptApi
 
+from db_logger import db_write_request
 from unit_tests import run_test
 from utils import extract_video_id
 
@@ -33,6 +35,8 @@ class TranscriptOption:
 @app.route('/api/v1/subtitles/options', methods=['GET'])
 def get_options():
     url = request.args.get('url')
+    db_write_request('GET /api/v1/subtitles/options', [url])
+
     if not url:
         return http_400_error("'url' parameter is missing")
 
@@ -60,6 +64,7 @@ def http_400_error(error_message):
 def get_subtitles():
     video_id = request.args.get('video_id')
     lang = request.args.get('lang')
+    db_write_request('GET /api/v1/subtitles', [video_id, lang])
 
     if not video_id:
         return http_400_error("'video_id' parameter is missing")
@@ -72,11 +77,13 @@ def get_subtitles():
     all_text = " ".join(item["text"] for item in transcript)
     return {"transcript": all_text}, 200, {'Content-Type': 'application/json'}
 
+
 @app.route('/api/v1/subtitles/translates', methods=['GET'])
 def get_translates():
     video_id = request.args.get('video_id')
     subtitles_lang = request.args.get('subtitles_lang')
     translate_lang = request.args.get('translate_lang')
+    db_write_request('GET /api/v1/subtitles/translates', [video_id, subtitles_lang, translate_lang])
 
     list_transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
     transcript = list_transcripts.find_transcript([subtitles_lang])
@@ -86,6 +93,8 @@ def get_translates():
     all_text = " ".join(item["text"] for item in translated)
     return {"transcript": all_text}, 200, {'Content-Type': 'application/json'}
 
+
 if __name__ == '__main__':
-    run_test()
+    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        run_test()
     app.run(host='0.0.0.0', port=5000, debug=True)
