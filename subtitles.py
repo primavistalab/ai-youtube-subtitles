@@ -1,7 +1,6 @@
 import json
 
 from flask import Flask, request
-# from pytube import YouTube
 from youtube_transcript_api import YouTubeTranscriptApi
 
 from unit_tests import run_test
