@@ -9,33 +9,25 @@ MONGO_DB = "ai-youtube-subtitles"
 REQUEST_LOG_DOCUMENT = "request_log"
 MONGO_PORT = 27017
 
-request_log_document = None
-
-
-def get_mongo_document():
-    global request_log_document
-
-    if request_log_document is not None:
-        return request_log_document
-
-    try:
-        connection_string = f"mongodb://{MONGO_INITDB_ROOT_USERNAME}:{MONGO_INITDB_ROOT_PASSWORD}@{MONGO_PATH}"
-        mongo_client = MongoClient(connection_string, MONGO_PORT)
-        database = mongo_client[MONGO_DB]
-        request_log_document = database[REQUEST_LOG_DOCUMENT]
-    except Exception as e:
-        print(f"Error connecting to MongoDB: {e}")
-        request_log_document = None
-
-    return request_log_document
+connection_string = f"mongodb://{MONGO_INITDB_ROOT_USERNAME}:{MONGO_INITDB_ROOT_PASSWORD}@{MONGO_PATH}"
+mongo_client = MongoClient(connection_string,
+                           MONGO_PORT,
+                           connectTimeoutMS=3000,
+                           socketTimeoutMS=3000,
+                           serverSelectionTimeoutMS=3000)
 
 
 def db_write_request(url, request_params):
-    doc = get_mongo_document()
-    if doc is not None:
-        log_entry = {
-            "url": url,
-            "request_params": request_params,
-            "date_time": datetime.datetime.now(datetime.UTC)
-        }
-        doc.insert_one(log_entry)
+    try:
+        database = mongo_client[MONGO_DB]
+        doc = database[REQUEST_LOG_DOCUMENT]
+        if doc is not None:
+            log_entry = {
+                "url": url,
+                "request_params": request_params,
+                "date_time": datetime.datetime.now(datetime.UTC)
+            }
+            doc.insert_one(log_entry)
+    except Exception as e:
+        print(f"Error accessing MongoDB: {e}")
+        return None
