@@ -3,9 +3,12 @@ import logging
 import os
 
 from flask import Flask, request
-from youtube_transcript_api import YouTubeTranscriptApi
+from pydantic_core import ValidationError
+from youtube_transcript_api import YouTubeTranscriptApi, CouldNotRetrieveTranscript
 
 from db_logger import db_write_request
+from http_param_validators import HttpTranslateParams, HttpSubtitleParams, HttpOptionParams
+from http_utils import http_400_error
 from unit_tests import run_test
 from utils import extract_video_id
 
@@ -34,64 +37,65 @@ class TranscriptOption:
 
 @app.route('/api/v1/subtitles/options', methods=['GET'])
 def get_options():
-    url = request.args.get('url')
-    db_write_request('GET /api/v1/subtitles/options', [url])
+    db_write_request(request)
+    try:
+        url_param = HttpOptionParams(**request.args)
+    except ValidationError as e:
+        return http_400_error(e.errors())
 
-    if not url:
-        return http_400_error("'url' parameter is missing")
-
-    logger.info("url=%s", url)
-    video_id = extract_video_id(url)
+    video_id = extract_video_id(url_param.url)
     if not video_id or len(video_id) == 0:
         return http_400_error("Cannot extract video ID")
-    logger.info("video_id=%s", video_id)
 
-    list_transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
+    try:
+        list_transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
+    except CouldNotRetrieveTranscript as e:
+        return http_400_error(e.cause)
+
     transcript_options = []
     for transcript in list_transcripts:
         option = TranscriptOption(transcript.video_id, transcript.language, transcript.language_code, transcript.is_generated, transcript.is_translatable, transcript.translation_languages)
         transcript_options.append(option)
-        logger.debug(repr(option))
-        # print()
     return json.dumps([option.__dict__ for option in transcript_options]), 200, {'Content-Type': 'application/json'}
-
-
-def http_400_error(error_message):
-    return {"status": "error", "message": error_message}, 400, {'Content-Type': 'application/json'}
 
 
 @app.route('/api/v1/subtitles', methods=['GET'])
 def get_subtitles():
-    video_id = request.args.get('video_id')
-    lang = request.args.get('lang')
-    db_write_request('GET /api/v1/subtitles', [video_id, lang])
+    db_write_request(request)
+    try:
+        translate_params = HttpSubtitleParams(**request.args)
+    except ValidationError as e:
+        return http_400_error(e.errors())
 
-    if not video_id:
-        return http_400_error("'video_id' parameter is missing")
-    if not lang:
-        return http_400_error("'lang' parameter is missing")
+    try:
+        raw_subtitles = (YouTubeTranscriptApi
+                         .get_transcript(translate_params.video_id, languages=[translate_params.lang]))
+    except CouldNotRetrieveTranscript as e:
+        return http_400_error(e.cause)
 
-    logger.info("video_id=%s, lang=%s", video_id, lang)
-    transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
-
-    all_text = " ".join(item["text"] for item in transcript)
-    return {"transcript": all_text}, 200, {'Content-Type': 'application/json'}
+    subtitles = " ".join(item["text"] for item in raw_subtitles)
+    return {"subtitles": subtitles}, 200, {'Content-Type': 'application/json'}
 
 
 @app.route('/api/v1/subtitles/translates', methods=['GET'])
 def get_translates():
-    video_id = request.args.get('video_id')
-    subtitles_lang = request.args.get('subtitles_lang')
-    translate_lang = request.args.get('translate_lang')
-    db_write_request('GET /api/v1/subtitles/translates', [video_id, subtitles_lang, translate_lang])
+    db_write_request(request)
+    try:
+        translate_params = HttpTranslateParams(**request.args)
+    except ValidationError as e:
+        return http_400_error(e.errors())
 
-    list_transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
-    transcript = list_transcripts.find_transcript([subtitles_lang])
-    translated_transcript = transcript.translate(translate_lang)
-    translated = translated_transcript.fetch()
+    try:
+        translated = (YouTubeTranscriptApi
+                      .list_transcripts(translate_params.video_id)
+                      .find_transcript([translate_params.subtitles_lang])
+                      .translate(translate_params.translate_lang)
+                      .fetch())
+    except CouldNotRetrieveTranscript as e:
+        return http_400_error(e.cause)
 
-    all_text = " ".join(item["text"] for item in translated)
-    return {"transcript": all_text}, 200, {'Content-Type': 'application/json'}
+    transcript = " ".join(item["text"] for item in translated)
+    return {"translate": transcript}, 200, {'Content-Type': 'application/json'}
 
 
 if __name__ == '__main__':

@@ -1,12 +1,13 @@
 import datetime
 
+from flask import Request
 from pymongo import MongoClient
 
 MONGO_INITDB_ROOT_USERNAME = "evg"
 MONGO_INITDB_ROOT_PASSWORD = "23a953fd599c"
 MONGO_PATH = "localhost/"
 MONGO_DB = "ai-youtube-subtitles"
-REQUEST_LOG_DOCUMENT = "request_log"
+LOG_COLLECTION = "request_log"
 MONGO_PORT = 27017
 
 connection_string = f"mongodb://{MONGO_INITDB_ROOT_USERNAME}:{MONGO_INITDB_ROOT_PASSWORD}@{MONGO_PATH}"
@@ -17,17 +18,35 @@ mongo_client = MongoClient(connection_string,
                            serverSelectionTimeoutMS=3000)
 
 
-def db_write_request(url, request_params):
+def get_collection():
+    database = mongo_client[MONGO_DB]
+    return database[LOG_COLLECTION]
+
+
+def create_index(index_name: str, fields: list, unique: bool = False):
+    collection = get_collection()
+    indexes = collection.list_indexes()
+    for index in indexes:
+        if index.get("name") == index_name:
+            return
+    collection.create_index(fields, name=index_name, unique=unique)
+    print(f"Index {index_name} created")
+
+
+def db_write_request(request: Request):
     try:
-        database = mongo_client[MONGO_DB]
-        doc = database[REQUEST_LOG_DOCUMENT]
-        if doc is not None:
+        collection = get_collection()
+        if collection is not None:
             log_entry = {
-                "url": url,
-                "request_params": request_params,
+                "method": request.method,
+                "url": request.path,
+                "args": request.args,
                 "date_time": datetime.datetime.now(datetime.UTC)
             }
-            doc.insert_one(log_entry)
+            collection.insert_one(log_entry)
     except Exception as e:
         print(f"Error accessing MongoDB: {e}")
         return None
+
+
+create_index(index_name="date_time_idx", fields=[("date_time", 1)], unique=False)
